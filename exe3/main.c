@@ -24,25 +24,23 @@ void data_task(void *p) {
 
 void process_task(void *p) {
     int data = 0;
-    static int buffer[5] = {0};
+    static int buffer[5] = {0};  // Buffer inicializado com zeros
     static int buffer_index = 0;
-    static int num_samples = 0;
 
     while (true) {
         if (xQueueReceive(xQueueData, &data, 100)) {
+            // Adiciona o novo valor no buffer circular
             buffer[buffer_index] = data;
             buffer_index = (buffer_index + 1) % 5;
             
-            if (num_samples < 5) {
-                num_samples++;
-            }
-            
+            // Calcula a soma de TODOS os 5 elementos do buffer
             int sum = 0;
-            for (int i = 0; i < num_samples; i++) {
+            for (int i = 0; i < 5; i++) {
                 sum += buffer[i];
             }
             
-            int average = sum / num_samples;
+            // SEMPRE divide por 5 (tamanho da janela)
+            int average = sum / 5;
             printf("%d\n", average);
 
             vTaskDelay(pdMS_TO_TICKS(50));
