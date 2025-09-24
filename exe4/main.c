@@ -7,23 +7,24 @@
 #define ADC_INPUT      2          // GP28 = ADC2
 #define VREF           3.3f
 #define ADC_MAX        4095.0f
-#define CHECK_MS       20         // frequência de leitura do ADC (~50 Hz)
+#define CHECK_MS       20         // ~50 Hz de leitura do ADC
 
-// períodos de alternância (metade do período de pisca)
-#define TOGGLE_MS_Z1   150    
-#define TOGGLE_MS_Z2   250    
+// Metade do período de pisca (intervalo entre alternâncias)
+#define TOGGLE_MS_Z1   150        
+#define TOGGLE_MS_Z2   250        
+
 static repeating_timer_t blink_timer;
 static bool timer_running = false;
 static bool led_state = false;
 
-// Alterna o LED – chamado pelo timer periódico
+// Callback do timer: alterna o LED
 static bool blink_cb(repeating_timer_t *t) {
     led_state = !led_state;
     gpio_put(LED_PIN, led_state);
-    return true; // mantém o timer repetindo
+    return true; // continua repetindo
 }
 
-// Inicia (ou reinicia) o timer de pisca com o intervalo desejado
+// Inicia/reinicia o timer de pisca com o intervalo desejado
 static void start_blink_timer(int interval_ms) {
     if (timer_running) cancel_repeating_timer(&blink_timer);
     led_state = false;
@@ -42,19 +43,19 @@ static void stop_blink_timer(void) {
     gpio_put(LED_PIN, 0);
 }
 
-// Converte a leitura do ADC em tensão (0–3.3 V)
+// Lê o ADC e converte para tensão (0–3.3 V)
 static inline float read_voltage(void) {
     uint16_t raw = adc_read();
     return (raw * VREF) / ADC_MAX;
 }
 
 int main() {
-    // GPIO do LED
+    // Configura LED
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
     gpio_put(LED_PIN, 0);
 
-    // ADC em GP28 (ADC2)
+    // Configura ADC no GP28/ADC2
     adc_init();
     adc_gpio_init(28);
     adc_select_input(ADC_INPUT);
@@ -74,7 +75,7 @@ int main() {
 
             if (zone != last_zone) {
                 switch (zone) {
-                    case 0: 
+                    case 0:
                         stop_blink_timer();
                         break;
                     case 1:
@@ -86,7 +87,6 @@ int main() {
                 }
                 last_zone = zone;
             }
-
             last_check = now;
         }
     }
