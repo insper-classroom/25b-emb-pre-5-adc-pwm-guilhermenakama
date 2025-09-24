@@ -43,11 +43,11 @@ int main() {
             }
             
             if (voltage >= 1.0f && voltage < 2.0f) {
-                add_repeating_timer_ms(300, timer_callback, NULL, &timer);
+                add_repeating_timer_ms(150, timer_callback, NULL, &timer);
                 timer_active = true;
             }
             else if (voltage >= 2.0f) {
-                add_repeating_timer_ms(500, timer_callback, NULL, &timer);
+                add_repeating_timer_ms(250, timer_callback, NULL, &timer);
                 timer_active = true;
             }
             else {

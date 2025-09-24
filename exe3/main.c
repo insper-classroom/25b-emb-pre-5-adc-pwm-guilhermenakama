@@ -24,29 +24,26 @@ void data_task(void *p) {
 
 void process_task(void *p) {
     int data = 0;
-    static int samples[5];
-    static int count = 0;
+    static int buffer[5] = {0};
+    static int buffer_index = 0;
+    static int num_samples = 0;
 
     while (true) {
         if (xQueueReceive(xQueueData, &data, 100)) {
-            if (count < 5) {
-                samples[count] = data;
-                count++;
-            } else {
-                for (int i = 0; i < 4; i++) {
-                    samples[i] = samples[i + 1];
-                }
-                samples[4] = data;
+            buffer[buffer_index] = data;
+            buffer_index = (buffer_index + 1) % 5;
+            
+            if (num_samples < 5) {
+                num_samples++;
             }
             
             int sum = 0;
-            int items = (count < 5) ? count : 5;
-            for (int i = 0; i < items; i++) {
-                sum += samples[i];
+            for (int i = 0; i < num_samples; i++) {
+                sum += buffer[i];
             }
             
-            int filtered = sum / items;
-            printf("%d\n", filtered);
+            int average = sum / num_samples;
+            printf("%d\n", average);
 
             vTaskDelay(pdMS_TO_TICKS(50));
         }
