@@ -46,11 +46,11 @@ int main() {
             }
             else if (voltage < 2.0f) {
                 led_enabled = true;
-                add_repeating_timer_ms(150, timer_callback, NULL, &timer);
+                add_repeating_timer_ms(300, timer_callback, NULL, &timer);
             }
             else {
                 led_enabled = true;
-                add_repeating_timer_ms(400, timer_callback, NULL, &timer);
+                add_repeating_timer_ms(500, timer_callback, NULL, &timer);
             }
             
             next_adc_time = time_us_64() + 100000;
