@@ -8,85 +8,86 @@ const int PIN_LED_B = 4;
 const float conversion_factor = 3.3f / (1 << 12);
 
 // Variáveis globais
-volatile bool flag_timer_adc = false;
-struct repeating_timer timer_adc;
-struct repeating_timer timer_led;
-bool timer_led_active = false;
-int delay_atual = 0;
+struct repeating_timer timer;
+bool timer_active = false;
+bool led_state = false;  // Estado global do LED para garantir previsibilidade
+int current_zone = -1;
 
-// Timer callback para verificar o potenciômetro a cada 10ms
-bool timer_adc_callback(struct repeating_timer *t) {
-    flag_timer_adc = true;
-    return true;
-}
-
-// Timer callback para piscar o LED
-bool timer_led_callback(struct repeating_timer *t) {
-    static bool state = false;
-    state = !state;
-    gpio_put(PIN_LED_B, state);
+// Callback para piscar LED
+bool led_callback(struct repeating_timer *t) {
+    led_state = !led_state;
+    gpio_put(PIN_LED_B, led_state);
     return true;
 }
 
 int main() {
     stdio_init_all();
     
-    // Inicia o ADC
-    adc_init();
-    adc_gpio_init(28);   // GP28
-    adc_select_input(2); // Canal 2
-    
-    // Inicia o LED na placa apagado
+    // Configura LED
     gpio_init(PIN_LED_B);
     gpio_set_dir(PIN_LED_B, GPIO_OUT);
     gpio_put(PIN_LED_B, 0);
     
-    // Cria timer para verificar ADC a cada 10ms
-    add_repeating_timer_ms(10, timer_adc_callback, NULL, &timer_adc);
+    // Configura ADC
+    adc_init();
+    adc_gpio_init(28);   // GP28 = potenciômetro
+    adc_select_input(2); // Canal 2 = GP28
     
-    int delay = 0;
+    // Controle de tempo para verificação
+    uint64_t last_check = 0;
     
     while (1) {
-        // Verifica se é hora de ler o potenciômetro
-        if (flag_timer_adc) {
-            // Lê o valor do potenciômetro em volts
-            uint16_t adc_raw = adc_read();
-            float potenciometro = adc_raw * conversion_factor;
+        uint64_t now = time_us_64();
+        
+        // Verifica ADC a cada 10ms (10000 microsegundos)
+        if (now - last_check >= 10000) {
+            // Lê ADC
+            uint16_t adc_value = adc_read();
+            float voltage = adc_value * conversion_factor;
             
-            // Verifica em qual faixa está e se mudou
-            if (potenciometro < 1.0f && delay != 0) {
-                // Deixa LED apagado
-                if (timer_led_active) {
-                    cancel_repeating_timer(&timer_led);
-                    timer_led_active = false;
-                }
-                gpio_put(PIN_LED_B, 0);
-                delay = 0;
-            } 
-            else if (potenciometro >= 1.0f && potenciometro < 2.0f && delay != 300) {
-                // LED piscando com período de 300ms (150ms on + 150ms off)
-                if (timer_led_active) {
-                    cancel_repeating_timer(&timer_led);
-                    timer_led_active = false;
-                }
-                gpio_put(PIN_LED_B, 0);
-                add_repeating_timer_ms(150, timer_led_callback, NULL, &timer_led);
-                timer_led_active = true;
-                delay = 300;
-            } 
-            else if (potenciometro >= 2.0f && delay != 500) {
-                // LED piscando com período de 500ms (250ms on + 250ms off)
-                if (timer_led_active) {
-                    cancel_repeating_timer(&timer_led);
-                    timer_led_active = false;
-                }
-                gpio_put(PIN_LED_B, 0);
-                add_repeating_timer_ms(250, timer_led_callback, NULL, &timer_led);
-                timer_led_active = true;
-                delay = 500;
+            // Determina zona
+            int zone;
+            if (voltage < 1.0f) {
+                zone = 0;  // Desligado
+            } else if (voltage < 2.0f) {
+                zone = 1;  // 300ms (150ms + 150ms)
+            } else {
+                zone = 2;  // 500ms (250ms + 250ms)
             }
             
-            flag_timer_adc = false;
+            // Se mudou de zona, reconfigura
+            if (zone != current_zone) {
+                // Para timer anterior se ativo
+                if (timer_active) {
+                    cancel_repeating_timer(&timer);
+                    timer_active = false;
+                }
+                
+                // Configura nova zona
+                if (zone == 0) {
+                    // Zona 0: LED desligado
+                    led_state = false;
+                    gpio_put(PIN_LED_B, 0);
+                } else if (zone == 1) {
+                    // Zona 1: pisca 300ms (timer de 150ms)
+                    led_state = false;  // Reset estado para comportamento previsível
+                    gpio_put(PIN_LED_B, 0);  // Começa desligado
+                    add_repeating_timer_ms(150, led_callback, NULL, &timer);
+                    timer_active = true;
+                } else {
+                    // Zona 2: pisca 500ms (timer de 250ms)
+                    led_state = false;  // Reset estado para comportamento previsível
+                    gpio_put(PIN_LED_B, 0);  // Começa desligado
+                    add_repeating_timer_ms(250, led_callback, NULL, &timer);
+                    timer_active = true;
+                }
+                
+                current_zone = zone;
+            }
+            
+            last_check = now;
         }
     }
+    
+    return 0;
 }
