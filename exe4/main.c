@@ -43,7 +43,7 @@ static void rearm_led_timer(int delay_ms, bool do_immediate_toggle) {
     led_timer_armed = true;
 }
 
-// seu "timer" polled de 10ms (sem sleep)
+// "Timer" polled de 10 ms (sem sleep) — FIX!
 static bool timer_callback(void) {
     static bool first = true;
     static absolute_time_t next;
@@ -54,12 +54,14 @@ static bool timer_callback(void) {
         first = false;
         return true;
     }
-    if (absolute_time_diff_us(next, now) <= 0) { // now >= next
+    // >>> Correto: usa (now, next). Dispara quando now >= next.
+    if (absolute_time_diff_us(now, next) <= 0) {
         next = delayed_by_ms(now, 10);
         return true;
     }
     return false;
 }
+
 
 // leitura do potenciômetro em volts (ADC2 / GPIO28)
 static inline float read_potentiometer(void) {
