@@ -43,24 +43,23 @@ static void rearm_led_timer(int delay_ms, bool do_immediate_toggle) {
     led_timer_armed = true;
 }
 
-// "Timer" polled de 10 ms (sem sleep) — FIX!
 static bool timer_callback(void) {
     static bool first = true;
     static absolute_time_t next;
     absolute_time_t now = get_absolute_time();
 
-    if (first) { // dispara logo no início
-        next = delayed_by_ms(now, 10);
+    if (first) {
+        next = delayed_by_ms(now, 5);  // 5 ms
         first = false;
         return true;
     }
-    // >>> Correto: usa (now, next). Dispara quando now >= next.
-    if (absolute_time_diff_us(now, next) <= 0) {
-        next = delayed_by_ms(now, 10);
+    if (absolute_time_diff_us(now, next) <= 0) { // now >= next
+        next = delayed_by_ms(now, 5);  // 5 ms
         return true;
     }
     return false;
 }
+
 
 
 // leitura do potenciômetro em volts (ADC2 / GPIO28)
@@ -77,13 +76,18 @@ int main() {
     gpio_set_dir(PIN_LED_B, true);
     gpio_put(PIN_LED_B, 0);
 
-    // ADC2 (GPIO28) conforme diagram.json
+    // ADC2 (GPIO28)
     adc_init();
     adc_gpio_init(28);
     adc_select_input(2);
 
-    int delay = -1;      // tua flag (0=apagado, 300, 500)
-    int prev_delay = -2; // para detectar mudança de faixa
+    // --- descarta leituras iniciais pra estabilizar o ADC ---
+    for (int i = 0; i < 3; i++) (void)adc_read();
+
+    // tua flag: começar APAGADO
+    int delay = 0;           // 0=apagado
+    int prev_delay = -1;     // força rearmar na 1ª decisão
+
 
     while (1) {
         static bool flag_timer = false;
@@ -105,11 +109,11 @@ int main() {
 
             // só rearmar quando a faixa (delay) mudar
             if (delay != prev_delay) {
-                // toggle imediato somente quando entrar em zona de pisca
-                bool do_immediate_toggle = (delay == 300 || delay == 500);
-                rearm_led_timer(delay, do_immediate_toggle);
+                bool toggle_imediato = (delay == 300 || delay == 500);
+                rearm_led_timer(delay, toggle_imediato);
                 prev_delay = delay;
             }
+
 
             flag_timer = false;
         }
