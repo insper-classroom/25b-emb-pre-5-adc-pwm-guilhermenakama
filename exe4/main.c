@@ -1,4 +1,3 @@
-#include <stdbool.h>
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
@@ -6,117 +5,98 @@
 #include "hardware/adc.h"
 
 const int PIN_LED_B = 4;
-const float conversion_factor = 3.3f / (1 << 12); // 3.3/4096
+const float volt_conversion = 3.3f / 4096.0f; // 12 bits => 4096
 
-// --- estado do LED/timer ---
-static struct repeating_timer led_timer;
-static bool led_timer_armed = false;
-static bool led_state = false;
+static struct repeating_timer timer;
+volatile bool timer_active = false;   // indica se o timer está ativo
+volatile bool timer_tick = false;     // flag de evento do timer
+volatile bool led_on = false;         // estado lógico do LED
+static int current_zone = 0;
 
-// callback do timer do LED (pisca conforme delay)
-static bool led_timer_cb(struct repeating_timer *t) {
-    led_state = !led_state;
-    gpio_put(PIN_LED_B, led_state);
-    return true;
-}
-
-// rearma/cancela timer do LED de acordo com delay
-static void rearm_led_timer(int delay_ms, bool do_immediate_toggle) {
-    if (led_timer_armed) {
-        cancel_repeating_timer(&led_timer);
-        led_timer_armed = false;
-    }
-    if (delay_ms == 0) {
-        // zona 0: sempre apagado
-        led_state = false;
-        gpio_put(PIN_LED_B, 0);
-        return;
-    }
-
-    // 👉 toggle imediato para o teste detectar mudança de pino logo após trocar de faixa
-    if (do_immediate_toggle) {
-        led_state = !led_state;
-        gpio_put(PIN_LED_B, led_state);
-    }
-
-    add_repeating_timer_ms(delay_ms, led_timer_cb, NULL, &led_timer);
-    led_timer_armed = true;
-}
-
-static bool timer_callback(void) {
-    static bool first = true;
-    static absolute_time_t next;
-    absolute_time_t now = get_absolute_time();
-
-    if (first) {
-        next = delayed_by_ms(now, 5);  // 5 ms
-        first = false;
-        return true;
-    }
-    if (absolute_time_diff_us(now, next) <= 0) { // now >= next
-        next = delayed_by_ms(now, 5);  // 5 ms
-        return true;
-    }
-    return false;
-}
-
-
-
-// leitura do potenciômetro em volts (ADC2 / GPIO28)
-static inline float read_potentiometer(void) {
-    uint16_t raw = adc_read();
-    return raw * conversion_factor;
+// Callback do timer: apenas marca flag e retorna true
+bool timer_callback(struct repeating_timer *rt) {
+    (void)rt;
+    timer_tick = true;  // sinaliza para o main que o tempo passou
+    return true;        // mantém o timer ativo
 }
 
 int main() {
     stdio_init_all();
-
-    // LED GP4
+    
+    // Configura o LED
     gpio_init(PIN_LED_B);
-    gpio_set_dir(PIN_LED_B, true);
+    gpio_set_dir(PIN_LED_B, GPIO_OUT);
     gpio_put(PIN_LED_B, 0);
-
-    // ADC2 (GPIO28)
+    led_on = false;
+    
+    // Configura o ADC (GP28 -> ADC2)
     adc_init();
     adc_gpio_init(28);
     adc_select_input(2);
-
-    // --- descarta leituras iniciais pra estabilizar o ADC ---
-    for (int i = 0; i < 3; i++) (void)adc_read();
-
-    // tua flag: começar APAGADO
-    int delay = 0;           // 0=apagado
-    int prev_delay = -1;     // força rearmar na 1ª decisão
-
-
+    
+    uint64_t last_check = time_us_64();
+    
     while (1) {
-        static bool flag_timer = false;
-        static float voltagem = 0.0f;
+        uint64_t now = time_us_64();
+        
+        // 1) Ler ADC a cada 10 ms
+        if (now - last_check >= 10000) {
+            uint16_t result = adc_read();
+            float voltage = result * volt_conversion;
+            
+            // 2) Determinar zona
+            int new_zone;
+            if (voltage < 1.0f) {
+                new_zone = 0;
+            } else if (voltage < 2.0f) {
+                new_zone = 1;
+            } else {
+                new_zone = 2;
+            }
+            
+            // 3) Se zona mudou, reconfigura o timer
+            if (new_zone != current_zone) {
+                if (timer_active) {
+                    cancel_repeating_timer(&timer);
+                    timer_active = false;
+                }
 
-        // faz leitura logo no início e depois a cada 10ms
-        flag_timer = timer_callback();
-        if (flag_timer) {
-            voltagem = read_potentiometer();
+                if (new_zone == 0) {
+                    // LED apagado, sem timer
+                    gpio_put(PIN_LED_B, 0);
+                    led_on = false;
+                } else {
+                    // Zona 1 → 300 ms total (150 ms por ciclo)
+                    // Zona 2 → 500 ms total (250 ms por ciclo)
+                    int half_ms = (new_zone == 1) ? (300 / 2) : (500 / 2);
+                    if (half_ms <= 0) half_ms = 1;
 
-            // tua lógica de faixas
-            if (voltagem <= 1.0f && delay != 0) {
-                delay = 0;              // LED apagado
-            } else if (voltagem > 1.0f && voltagem <= 2.0f && delay != 300) {
-                delay = 300;            // pisca 300ms
-            } else if (voltagem > 2.0f && voltagem <= 3.3f && delay != 500) {
-                delay = 500;            // pisca 500ms
+                    bool ok = add_repeating_timer_ms(half_ms, timer_callback, NULL, &timer);
+                    if (ok) {
+                        timer_active = true;
+                        gpio_put(PIN_LED_B, 0);
+                        led_on = false;
+                    } else {
+                        timer_active = false;
+                        gpio_put(PIN_LED_B, 0);
+                        led_on = false;
+                    }
+                }
+
+                current_zone = new_zone;
             }
 
-            // só rearmar quando a faixa (delay) mudar
-            if (delay != prev_delay) {
-                bool toggle_imediato = (delay == 300 || delay == 500);
-                rearm_led_timer(delay, toggle_imediato);
-                prev_delay = delay;
-            }
-
-
-            flag_timer = false;
+            last_check = now;
         }
-        // sem sleep_* e sem tight_loop_contents()
+
+        // 4) Se o timer disparou, alternar o LED
+        if (timer_tick) {
+            timer_tick = false;       // consome o evento
+            led_on = !led_on;         // troca o estado lógico
+            gpio_put(PIN_LED_B, led_on);
+        }
+
+        // loop leve — sem sleep
+        tight_loop_contents();
     }
 }
