@@ -52,11 +52,8 @@ int main() {
     stdio_init_all();
     init_pin();
 
-    //uint64_t last_check = time_us_64();
-    int delay;
     int led_state = 0;
     int last_zone = 0;
-    int current_zone;
     repeating_timer_t timer_0;
     
     while(1) {
@@ -64,8 +61,8 @@ int main() {
         uint16_t result = adc_read();
         float voltage = result * volt_conversion;
 
-        current_zone = set_zone(voltage);
-        delay = time_delay_for_zone(current_zone);
+        int current_zone = set_zone(voltage);
+        int delay = time_delay_for_zone(current_zone);
 
         // Se mudou de zona, atualiza o timer
         if (current_zone != last_zone) {
