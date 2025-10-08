@@ -53,10 +53,10 @@ int main() {
     init_pin();
 
     //uint64_t last_check = time_us_64();
-    int delay = 0;
+    int delay;
     int led_state = 0;
     int last_zone = 0;
-    int current_zone = 0;
+    int current_zone;
     repeating_timer_t timer_0;
     
     while(1) {
@@ -73,7 +73,6 @@ int main() {
             if (current_zone == 0) {
                 gpio_put(LED_PIN, 0);
             } else {
-                printf("Changing to zone %d with delay %d ms\n", current_zone, delay);
                 if (!add_repeating_timer_us(delay * 1000,
                                         led_timer_callback,
                                         NULL,
