@@ -4,99 +4,92 @@
 #include "hardware/timer.h"
 #include "hardware/adc.h"
 
-const int PIN_LED_B = 4;
-const float volt_conversion = 3.3f / 4096.0f; // 12 bits => 4096
+const int LED_PIN = 4;
+const float volt_conversion = 3.3f / (1 << 12); // 12 bits => 4096
 
-static struct repeating_timer timer;
-volatile bool timer_active = false;   // indica se o timer está ativo
-volatile bool timer_tick = false;     // flag de evento do timer
-volatile bool led_on = false;         // estado lógico do LED
-static int current_zone = 0;
+volatile bool troca_estado_led = false;
+volatile int time_delay = 0;
 
 // Callback do timer: apenas marca flag e retorna true
-bool timer_callback(struct repeating_timer *rt) {
-    (void)rt;
-    timer_tick = true;  // sinaliza para o main que o tempo passou
-    return true;        // mantém o timer ativo
+bool led_timer_callback(repeating_timer_t *rt) {    
+  troca_estado_led = true;        // Sinaliza evento    
+  return true;                    // true=continua, false=para
 }
 
-int main() {
-    stdio_init_all();
-    
-    // Configura o LED
-    gpio_init(PIN_LED_B);
-    gpio_set_dir(PIN_LED_B, GPIO_OUT);
-    gpio_put(PIN_LED_B, 0);
-    led_on = false;
-    
-    // Configura o ADC (GP28 -> ADC2)
+int set_zone(float voltage) {
+    if (voltage < 1.0f) {
+        return 0;
+    } else if (voltage < 2.0f) {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+
+int time_delay_for_zone(int zone) {
+    if (zone == 0) {
+        return 0;
+    } else if (zone == 1) {
+        return 300;
+    } else {
+        return 500;
+    }
+}
+
+void init_pin() {
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_put(LED_PIN, 0);
+
     adc_init();
     adc_gpio_init(28);
     adc_select_input(2);
-    
-    uint64_t last_check = time_us_64();
-    
-    while (1) {
-        uint64_t now = time_us_64();
-        
-        // 1) Ler ADC a cada 10 ms
-        if (now - last_check >= 10000) {
-            uint16_t result = adc_read();
-            float voltage = result * volt_conversion;
-            
-            // 2) Determinar zona
-            int new_zone;
-            if (voltage < 1.0f) {
-                new_zone = 0;
-            } else if (voltage < 2.0f) {
-                new_zone = 1;
-            } else {
-                new_zone = 2;
-            }
-            
-            // 3) Se zona mudou, reconfigura o timer
-            if (new_zone != current_zone) {
-                if (timer_active) {
-                    cancel_repeating_timer(&timer);
-                    timer_active = false;
-                }
-
-                if (new_zone == 0) {
-                    // LED apagado, sem timer
-                    gpio_put(PIN_LED_B, 0);
-                    led_on = false;
-                } else {
-                    // Zona 1 → 300 ms total (150 ms por ciclo)
-                    // Zona 2 → 500 ms total (250 ms por ciclo)
-                    int half_ms = (new_zone == 1) ? (300 / 2) : (500 / 2);
-                    if (half_ms <= 0) half_ms = 1;
-
-                    bool ok = add_repeating_timer_ms(half_ms, timer_callback, NULL, &timer);
-                    if (ok) {
-                        timer_active = true;
-                        gpio_put(PIN_LED_B, 0);
-                        led_on = false;
-                    } else {
-                        timer_active = false;
-                        gpio_put(PIN_LED_B, 0);
-                        led_on = false;
-                    }
-                }
-
-                current_zone = new_zone;
-            }
-
-            last_check = now;
-        }
-
-        // 4) Se o timer disparou, alternar o LED
-        if (timer_tick) {
-            timer_tick = false;       // consome o evento
-            led_on = !led_on;         // troca o estado lógico
-            gpio_put(PIN_LED_B, led_on);
-        }
-
-        // loop leve — sem sleep
-        tight_loop_contents();
-    }
+    printf("ADC initialized\n");
 }
+
+
+int main() {
+    stdio_init_all();
+    init_pin();
+
+    //uint64_t last_check = time_us_64();
+    int delay = 0;
+    int led_state = 0;
+    int last_zone = 0;
+    int current_zone = 0;
+    repeating_timer_t timer_0;
+    
+    while(1) {
+
+        uint16_t result = adc_read();
+        float voltage = result * volt_conversion;
+
+        current_zone = set_zone(voltage);
+        delay = time_delay_for_zone(current_zone);
+
+        // Se mudou de zona, atualiza o timer
+        if (current_zone != last_zone) {
+            cancel_repeating_timer(&timer_0);
+            if (current_zone == 0) {
+                gpio_put(LED_PIN, 0);
+            } else {
+                printf("Changing to zone %d with delay %d ms\n", current_zone, delay);
+                if (!add_repeating_timer_us(delay * 1000,
+                                        led_timer_callback,
+                                        NULL,
+                                        &timer_0)) {
+                    printf("Failed to add timer\n");
+                }
+            }
+            last_zone = current_zone;
+            printf("Zone: %d, Delay: %d ms, Voltage: %.2f V\n", current_zone, delay, voltage);
+        }
+
+        if(troca_estado_led){
+            troca_estado_led = false;
+            led_state = !led_state;
+            printf("LED %s\n", led_state ? "ON" : "OFF");
+            gpio_put(LED_PIN, led_state);
+        }
+    }
+}       
